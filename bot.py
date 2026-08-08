@@ -1,4 +1,5 @@
 import os
+import base64
 import telebot
 import time
 import requests
@@ -12,7 +13,6 @@ GROQ_API_KEY = os.environ.get("GROQ_API_KEY")
 bot = telebot.TeleBot(TOKEN)
 app = Flask(__name__)
 
-# Har bir foydalanuvchi uchun til va suhbat tarixini saqlaymiz
 user_data = {}
 
 def get_user(chat_id):
@@ -23,6 +23,8 @@ def get_user(chat_id):
 def tizim_prompt(lang):
     if lang == "uz":
         return "Sen har doim faqat o'zbek tilida javob berasan."
+    elif lang == "ru":
+        return "Ты всегда отвечаешь только на русском языке."
     else:
         return "You always respond only in English."
 
@@ -50,12 +52,40 @@ def ai_javob(chat_id, savol):
     result = response.json()
     javob = result["choices"][0]["message"]["content"]
     
-    # Tarixga qo'shamiz, faqat oxirgi 10 ta xabarni saqlaymiz
     user["history"].append({"role": "user", "content": savol})
     user["history"].append({"role": "assistant", "content": javob})
     user["history"] = user["history"][-10:]
     
     return javob
+
+def rasm_tahlil(chat_id, image_base64, izoh_matni):
+    user = get_user(chat_id)
+    lang = user["lang"] or "uz"
+    
+    headers = {
+        "Authorization": f"Bearer {GROQ_API_KEY}",
+        "Content-Type": "application/json"
+    }
+    data = {
+        "model": "llama-3.2-11b-vision-preview",
+        "messages": [
+            {"role": "system", "content": tizim_prompt(lang)},
+            {
+                "role": "user",
+                "content": [
+                    {"type": "text", "text": izoh_matni or "Bu rasmda nima bor? Tavsiflab ber."},
+                    {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{image_base64}"}}
+                ]
+            }
+        ]
+    }
+    response = requests.post(
+        "https://api.groq.com/openai/v1/chat/completions",
+        headers=headers,
+        json=data
+    )
+    result = response.json()
+    return result["choices"][0]["message"]["content"]
 
 def ovozni_matnga(file_path):
     headers = {"Authorization": f"Bearer {GROQ_API_KEY}"}
@@ -76,23 +106,56 @@ def start(message):
     markup = types.InlineKeyboardMarkup()
     markup.add(
         types.InlineKeyboardButton("🇺🇿 O'zbekcha", callback_data="lang_uz"),
-        types.InlineKeyboardButton("🇬🇧 English", callback_data="lang_en")
+        types.InlineKeyboardButton("🇬🇧 English", callback_data="lang_en"),
+        types.InlineKeyboardButton("🇷🇺 Русский", callback_data="lang_ru")
     )
-    bot.send_message(message.chat.id, "Tilni tanlang / Choose a language:", reply_markup=markup)
+    bot.send_message(message.chat.id, "Tilni tanlang / Choose a language / Выберите язык:", reply_markup=markup)
 
 @bot.callback_query_handler(func=lambda call: call.data.startswith("lang_"))
 def til_tanlandi(call):
-    lang = "uz" if call.data == "lang_uz" else "en"
+    lang = call.data.replace("lang_", "")
     user = get_user(call.message.chat.id)
     user["lang"] = lang
     user["history"] = []
     
     bot.delete_message(call.message.chat.id, call.message.message_id)
     
-    if lang == "uz":
-        bot.send_message(call.message.chat.id, "Salom! Menga savol yozing yoki ovozli xabar yuboring 🤖")
-    else:
-        bot.send_message(call.message.chat.id, "Hello! Send me a question in text or voice 🤖")
+    xabarlar = {
+        "uz": "Salom! Menga savol yozing, ovozli xabar yoki rasm yuboring 🤖",
+        "en": "Hello! Send me a question in text, voice, or a photo 🤖",
+        "ru": "Привет! Напишите вопрос, отправьте голосовое сообщение или фото 🤖"
+    }
+    bot.send_message(call.message.chat.id, xabarlar[lang])
+
+@bot.message_handler(content_types=['photo'])
+def rasm_xabar(message):
+    chat_id = message.chat.id
+    user = get_user(chat_id)
+    
+    if not user["lang"]:
+        bot.reply_to(message, "Iltimos, avval /start bosing / Please press /start first")
+        return
+    
+    bot.send_chat_action(chat_id, 'typing')
+    
+    try:
+        file_info = bot.get_file(message.photo[-1].file_id)
+        downloaded_file = bot.download_file(file_info.file_path)
+        
+        image_base64 = base64.b64encode(downloaded_file).decode('utf-8')
+        izoh = message.caption or ""
+        
+        javob = rasm_tahlil(chat_id, image_base64, izoh)
+        bot.reply_to(message, javob)
+        
+    except Exception as e:
+        xatolar = {
+            "uz": "Rasmni tahlil qilib bo'lmadi 😔",
+            "en": "Couldn't analyze the image 😔",
+            "ru": "Не удалось проанализировать изображение 😔"
+        }
+        bot.reply_to(message, xatolar.get(user["lang"], "Xatolik 😔"))
+        print(f"Rasm xatolik: {e}")
 
 @bot.message_handler(content_types=['voice'])
 def ovozli_xabar(message):
@@ -116,14 +179,24 @@ def ovozli_xabar(message):
         os.remove("voice.ogg")
         
         if not matn:
-            bot.reply_to(message, "Ovozni tushuna olmadim, qayta urinib ko'ring." if user["lang"] == "uz" else "Couldn't understand the voice, try again.")
+            xatolar = {
+                "uz": "Ovozni tushuna olmadim, qayta urinib ko'ring.",
+                "en": "Couldn't understand the voice, try again.",
+                "ru": "Не удалось распознать голос, попробуйте снова."
+            }
+            bot.reply_to(message, xatolar.get(user["lang"], "Xatolik"))
             return
         
         javob = ai_javob(chat_id, matn)
         bot.reply_to(message, javob)
         
     except Exception as e:
-        bot.reply_to(message, "Xatolik yuz berdi 😔" if user["lang"] == "uz" else "An error occurred 😔")
+        xatolar = {
+            "uz": "Xatolik yuz berdi 😔",
+            "en": "An error occurred 😔",
+            "ru": "Произошла ошибка 😔"
+        }
+        bot.reply_to(message, xatolar.get(user["lang"], "Xatolik 😔"))
         print(f"Ovoz xatolik: {e}")
 
 @bot.message_handler(func=lambda message: True)
@@ -140,7 +213,12 @@ def javob_ber(message):
         javob = ai_javob(chat_id, message.text)
         bot.reply_to(message, javob)
     except Exception as e:
-        bot.reply_to(message, "Kechirasiz, xatolik yuz berdi 😔" if user["lang"] == "uz" else "Sorry, an error occurred 😔")
+        xatolar = {
+            "uz": "Kechirasiz, xatolik yuz berdi 😔",
+            "en": "Sorry, an error occurred 😔",
+            "ru": "Извините, произошла ошибка 😔"
+        }
+        bot.reply_to(message, xatolar.get(user["lang"], "Xatolik 😔"))
         print(f"AI xatolik: {e}")
 
 def run_bot():
