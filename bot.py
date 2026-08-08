@@ -87,6 +87,8 @@ def til_tanlandi(call):
     user["lang"] = lang
     user["history"] = []
     
+    bot.delete_message(call.message.chat.id, call.message.message_id)
+    
     if lang == "uz":
         bot.send_message(call.message.chat.id, "Salom! Menga savol yozing yoki ovozli xabar yuboring 🤖")
     else:
