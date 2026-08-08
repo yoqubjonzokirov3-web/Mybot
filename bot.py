@@ -41,7 +41,7 @@ def ai_javob(chat_id, savol):
         "Content-Type": "application/json"
     }
     data = {
-        "model": "llama-3.3-70b-versatile",
+        "model": "openai/gpt-oss-120b",
         "messages": messages
     }
     response = requests.post(
