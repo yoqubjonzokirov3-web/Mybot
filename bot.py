@@ -67,7 +67,7 @@ def rasm_tahlil(chat_id, image_base64, izoh_matni):
         "Content-Type": "application/json"
     }
     data = {
-        "model": "llama-3.2-11b-vision-preview",
+        "model": "qwen/qwen3.6-27b",
         "messages": [
             {"role": "system", "content": tizim_prompt(lang)},
             {
