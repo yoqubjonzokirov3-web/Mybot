@@ -1,5 +1,4 @@
 import os
-import base64
 import telebot
 import time
 import requests
@@ -58,35 +57,6 @@ def ai_javob(chat_id, savol):
     
     return javob
 
-def rasm_tahlil(chat_id, image_base64, izoh_matni):
-    user = get_user(chat_id)
-    lang = user["lang"] or "uz"
-    
-    headers = {
-        "Authorization": f"Bearer {GROQ_API_KEY}",
-        "Content-Type": "application/json"
-    }
-    data = {
-        "model": "qwen/qwen3.6-27b",
-        "messages": [
-            {"role": "system", "content": tizim_prompt(lang)},
-            {
-                "role": "user",
-                "content": [
-                    {"type": "text", "text": izoh_matni or "Bu rasmda nima bor? Tavsiflab ber."},
-                    {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{image_base64}"}}
-                ]
-            }
-        ]
-    }
-    response = requests.post(
-        "https://api.groq.com/openai/v1/chat/completions",
-        headers=headers,
-        json=data
-    )
-    result = response.json()
-    return result["choices"][0]["message"]["content"]
-
 def ovozni_matnga(file_path):
     headers = {"Authorization": f"Bearer {GROQ_API_KEY}"}
     with open(file_path, "rb") as f:
@@ -121,41 +91,11 @@ def til_tanlandi(call):
     bot.delete_message(call.message.chat.id, call.message.message_id)
     
     xabarlar = {
-        "uz": "Salom! Menga savol yozing, ovozli xabar yoki rasm yuboring 🤖",
-        "en": "Hello! Send me a question in text, voice, or a photo 🤖",
-        "ru": "Привет! Напишите вопрос, отправьте голосовое сообщение или фото 🤖"
+        "uz": "Salom! Menga savol yozing yoki ovozli xabar yuboring 🤖",
+        "en": "Hello! Send me a question in text or voice 🤖",
+        "ru": "Привет! Напишите вопрос или отправьте голосовое сообщение 🤖"
     }
     bot.send_message(call.message.chat.id, xabarlar[lang])
-
-@bot.message_handler(content_types=['photo'])
-def rasm_xabar(message):
-    chat_id = message.chat.id
-    user = get_user(chat_id)
-    
-    if not user["lang"]:
-        bot.reply_to(message, "Iltimos, avval /start bosing / Please press /start first")
-        return
-    
-    bot.send_chat_action(chat_id, 'typing')
-    
-    try:
-        file_info = bot.get_file(message.photo[-1].file_id)
-        downloaded_file = bot.download_file(file_info.file_path)
-        
-        image_base64 = base64.b64encode(downloaded_file).decode('utf-8')
-        izoh = message.caption or ""
-        
-        javob = rasm_tahlil(chat_id, image_base64, izoh)
-        bot.reply_to(message, javob)
-        
-    except Exception as e:
-        xatolar = {
-            "uz": "Rasmni tahlil qilib bo'lmadi 😔",
-            "en": "Couldn't analyze the image 😔",
-            "ru": "Не удалось проанализировать изображение 😔"
-        }
-        bot.reply_to(message, xatolar.get(user["lang"], "Xatolik 😔"))
-        print(f"Rasm xatolik: {e}")
 
 @bot.message_handler(content_types=['voice'])
 def ovozli_xabar(message):
